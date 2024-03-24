@@ -22,6 +22,7 @@
 import rospy
 import numpy as np
 import os
+import sys
 import cv2
 from enum import Enum
 from std_msgs.msg import UInt8
@@ -30,6 +31,7 @@ from cv_bridge import CvBridge, CvBridgeError
 
 class DetectSign():
     def __init__(self):
+        print(sys.version)
         self.fnPreproc()
         
         self.sub_image_type = "raw" # you can choose image type "compressed", "raw"
@@ -59,7 +61,7 @@ class DetectSign():
 
     def fnPreproc(self):
         # Initiate SIFT detector
-        self.sift = cv2.SIFT_create()
+        self.sift = cv2.xfeatures2d.SIFT_create()
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
         dir_path = dir_path.replace('turtlebot3_autorace_detect/nodes', 'turtlebot3_autorace_detect/')
