@@ -29,7 +29,13 @@ class ControlLane():
         self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
         self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
         self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
+        self.pub_error = rospy.Publisher('/control/error', Float64, queue_size = 1)
+        self.pub_culm_square_error = rospy.Publisher('/control/culm_square_error', Float64, queue_size = 1)
+        self.pub_mse_error = rospy.Publisher('/control/mse_error', Float64, queue_size = 1)
 
+        self.culm_error = 0
+        self.culm_sqaure_error = 0
+        self.spin_cnt = 0
         self.lastError = 0
         self.MAX_VEL = 0.1
 
@@ -39,14 +45,23 @@ class ControlLane():
         self.MAX_VEL = max_vel_msg.data
 
     def cbFollowLane(self, desired_center):
+        self.spin_cnt += 1
+
         center = desired_center.data
 
         error = center - 500
+        self.culm_error += error
+        self.culm_sqaure_error += error ** 2
 
-        Kp = 0.0025
+        # Original Kp : 0.0025
+        Kp = 0.007
+        # Original Kd : 0.007
         Kd = 0.007
+        # Ki was added later
+        # TODO : set proper Ki with tuning
+        Ki = 0.0015
 
-        angular_z = Kp * error + Kd * (error - self.lastError)
+        angular_z = Kp * error + Kd * (error - self.lastError) + Ki * self.culm_error
         self.lastError = error
         
         twist = Twist()
@@ -57,7 +72,14 @@ class ControlLane():
         twist.angular.x = 0
         twist.angular.y = 0
         twist.angular.z = -max(angular_z, -2.0) if angular_z < 0 else -min(angular_z, 2.0)
+
+        # Move the robot
         self.pub_cmd_vel.publish(twist)
+
+        # For logging
+        self.pub_error.publish(error)
+        self.pub_culm_square_error.publish(self.culm_sqaure_error)
+        self.pub_mse_error.publish(np.sqrt(self.culm_sqaure_error / self.spin_cnt))
 
     def fnShutDown(self):
         rospy.loginfo("Shutting down. cmd_vel will be 0")
