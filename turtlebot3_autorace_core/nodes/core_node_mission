@@ -68,10 +68,12 @@ class ControlMission():
         self.red_light_model = red_light_model.read()
 
         yellow_light_path = model_dir_path + '/traffic_light_yellow/model.sdf'
+        # yellow_light_path = model_dir_path + '/traffic_light_red/model.sdf'
         yellow_light_model = open(yellow_light_path, 'r')
         self.yellow_light_model = yellow_light_model.read()
 
         green_light_path = model_dir_path + '/traffic_light_green/model.sdf'
+        # yellow_light_path = model_dir_path + '/traffic_light_red/model.sdf'
         green_light_model = open(green_light_path, 'r')
         self.green_light_model = green_light_model.read()
 
