@@ -118,6 +118,27 @@ class DetectTrafficLight():
             loop_rate.sleep()
 
     def cbGetDetectTrafficLightParam(self, config, level):
+        config.hue_red_l = self.hue_red_l
+        config.hue_red_h = self.hue_red_h
+        config.saturation_red_l = self.saturation_red_l
+        config.saturation_red_h = self.saturation_red_h
+        config.lightness_red_l = self.lightness_red_l
+        config.lightness_red_h = self.lightness_red_h
+
+        config.hue_yellow_l = self.hue_yellow_l
+        config.hue_yellow_h = self.hue_yellow_h
+        config.saturation_yellow_l = self.saturation_yellow_l
+        config.saturation_yellow_h = self.saturation_yellow_h
+        config.lightness_yellow_l = self.lightness_yellow_l
+        config.lightness_yellow_h = self.lightness_yellow_h
+
+        config.hue_green_l = self.hue_green_l
+        config.hue_green_h = self.hue_green_h
+        config.saturation_green_l = self.saturation_green_l
+        config.saturation_green_h = self.saturation_green_h
+        config.lightness_green_l =  self.lightness_green_l
+        config.lightness_green_h = self.lightness_green_h
+
         rospy.loginfo("[Detect Traffic Light] Detect Traffic Light Calibration Parameter reconfigured to")
         rospy.loginfo("hue_red_l : %d", config.hue_red_l)
         rospy.loginfo("hue_red_h : %d", config.hue_red_h)
@@ -139,27 +160,6 @@ class DetectTrafficLight():
         rospy.loginfo("saturation_green_h : %d", config.saturation_green_h)
         rospy.loginfo("lightness_green_l : %d", config.lightness_green_l)
         rospy.loginfo("lightness_green_h : %d", config.lightness_green_h)
-
-        self.hue_red_l = config.hue_red_l
-        self.hue_red_h = config.hue_red_h
-        self.saturation_red_l = config.saturation_red_l
-        self.saturation_red_h = config.saturation_red_h
-        self.lightness_red_l = config.lightness_red_l
-        self.lightness_red_h = config.lightness_red_h
-
-        self.hue_yellow_l = config.hue_yellow_l
-        self.hue_yellow_h = config.hue_yellow_h
-        self.saturation_yellow_l = config.saturation_yellow_l
-        self.saturation_yellow_h = config.saturation_yellow_h
-        self.lightness_yellow_l = config.lightness_yellow_l
-        self.lightness_yellow_h = config.lightness_yellow_h
-
-        self.hue_green_l = config.hue_green_l
-        self.hue_green_h = config.hue_green_h
-        self.saturation_green_l = config.saturation_green_l
-        self.saturation_green_h = config.saturation_green_h
-        self.lightness_green_l = config.lightness_green_l
-        self.lightness_green_h = config.lightness_green_h
 
         return config
 
@@ -205,7 +205,7 @@ class DetectTrafficLight():
                 cv_image_mask = self.fnMaskRedTrafficLight()
                 cv_image_mask = cv2.GaussianBlur(cv_image_mask,(5,5),0)
 
-                status3 = self.fnFindCircleOfTrafficLight(cv_image_mask, 'red')
+                status3 = self.fnFindCircleOfTrafficLight(cv_image_mask, 'red') 
                 if status3 == 3:
                     rospy.loginfo("detect RED")
                     self.red_count += 1
