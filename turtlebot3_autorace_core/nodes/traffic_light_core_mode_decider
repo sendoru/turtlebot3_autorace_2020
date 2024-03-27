@@ -54,6 +54,10 @@ class CoreModeDecider():
         self.fnPublishMode()
 
     def fnDecideMode(self, invoked_object, msg_data):                       # starts only when the traffic sign / traffic light is detected & current_mode is lane_following
+        # shouldn't work if the traffic light is green iff detect_traffic_light published lane_following
+        if msg_data.data == self.CurrentMode.lane_following.value:
+            return
+
         if self.current_mode == self.CurrentMode.lane_following.value:
             if invoked_object == self.InvokedObject.traffic_light.value:    # Traffic Light detected
                 self.current_mode = self.CurrentMode.traffic_light.value
