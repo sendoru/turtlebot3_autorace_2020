@@ -21,37 +21,90 @@
  
 import rospy
 import numpy as np
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Bool
+from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+import time
 
 class ControlLane():
     def __init__(self):
+        self.sub_scan_obstacle = rospy.Subscriber('/detect/scan', LaserScan, self.cbScanObstacle, queue_size=1)
         self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
-        self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
+        self.sub_max_vel = rospy.Subscriber('/control/max_vel', Bool, self.cbGetMaxVel, queue_size = 1)
+        self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', Bool, self.cbIsReverse, queue_size = 1)
+        self.sub_is_stop = rospy.Subscriber('/control/is_stop', Bool, self.cbIsStop, queue_size = 1)
+
         self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
         self.pub_error = rospy.Publisher('/control/error', Float64, queue_size = 1)
-        self.pub_culm_square_error = rospy.Publisher('/control/culm_square_error', Float64, queue_size = 1)
+        self.pub_cumul_square_error = rospy.Publisher('/control/cumul_square_error', Float64, queue_size = 1)
         self.pub_mse_error = rospy.Publisher('/control/mse_error', Float64, queue_size = 1)
 
-        self.culm_error = 0
-        self.culm_sqaure_error = 0
+        self.cumul_error = 0
+        self.cumul_sqaure_error = 0
         self.spin_cnt = 0
         self.lastError = 0
-        self.MAX_VEL = 0.1
+        self.MAX_VEL = 0.18
+        self.is_obstacle_detected = False
+        self.is_reverse = False
+        self.is_reverse_switched = False
+        self.is_stop = False
+        self.reverse_degree_sum = 0
+        self.time = 0
+
 
         rospy.on_shutdown(self.fnShutDown)
 
     def cbGetMaxVel(self, max_vel_msg):
         self.MAX_VEL = max_vel_msg.data
 
+    def cbIsReverse(self, is_reverse_msg):
+        if self.is_reverse != is_reverse_msg.data:
+            self.is_reverse_switched = True
+            # self.reverse_degree_sum += 180
+        self.is_reverse = is_reverse_msg.data
+
+
+    
+    def cbIsStop(self, is_stop_msg):
+        self.is_stop = is_stop_msg.data
+
     def cbFollowLane(self, desired_center):
         self.spin_cnt += 1
-
         center = desired_center.data
 
         error = center - 500
-        self.culm_error += error
-        self.culm_sqaure_error += error ** 2
+        self.cumul_error += error
+        self.cumul_sqaure_error += error ** 2
+
+        # block other manipulations and turn the robot 180 degrees
+        if self.is_reverse_switched:
+            twist = Twist()
+            twist.linear.x = 0
+            twist.linear.y = 0
+            twist.linear.z = 0
+            twist.angular.x = 0
+            twist.angular.y = 0
+            twist.angular.z = 1.0
+            self.pub_cmd_vel.publish(twist)
+            self.pub_error.publish(error)
+            self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
+            self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
+            return
+
+        # stop the robot if obstacle is detected
+        if self.is_obstacle_detected or self.is_stop:
+            twist = Twist()
+            twist.linear.x = 0
+            twist.linear.y = 0
+            twist.linear.z = 0
+            twist.angular.x = 0
+            twist.angular.y = 0
+            twist.angular.z = 0
+            self.pub_cmd_vel.publish(twist)
+            self.pub_error.publish(error)
+            self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
+            self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
+            return
 
         # Original Kp : 0.0025
         Kp = 0.007
@@ -61,7 +114,7 @@ class ControlLane():
         # TODO : set proper Ki with tuning
         Ki = 0.0015
 
-        angular_z = Kp * error + Kd * (error - self.lastError) + Ki * self.culm_error
+        angular_z = Kp * error + Kd * (error - self.lastError) + Ki * self.cumul_error
         self.lastError = error
         
         twist = Twist()
@@ -78,8 +131,21 @@ class ControlLane():
 
         # For logging
         self.pub_error.publish(error)
-        self.pub_culm_square_error.publish(self.culm_sqaure_error)
-        self.pub_mse_error.publish(np.sqrt(self.culm_sqaure_error / self.spin_cnt))
+        self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
+        self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
+
+    def cbScanObstacle(self, scan):
+        angle_scan = 25
+        scan_start = 0 - angle_scan
+        scan_end = 0 + angle_scan
+        threshold_distance = 0.2
+        is_obstacle_detected = False
+
+        for i in range(scan_start, scan_end):
+            if scan.ranges[i] < threshold_distance and scan.ranges[i] > 0.01:
+                is_obstacle_detected = True
+
+        self.is_obstacle_detected = is_obstacle_detected
 
     def fnShutDown(self):
         rospy.loginfo("Shutting down. cmd_vel will be 0")
