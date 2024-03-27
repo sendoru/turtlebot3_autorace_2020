@@ -93,6 +93,7 @@ class DetectTrafficLight():
         self.pub_traffic_light_return = rospy.Publisher('/detect/traffic_light_stamped', UInt8, queue_size=1)
         self.pub_parking_start = rospy.Publisher('/control/traffic_light_start', UInt8, queue_size = 1)
         self.pub_traffic_light = rospy.Publisher('/detect/traffic_light', UInt8, queue_size=1)
+        self.pub_decide_mode = rospy.Publisher('/core/decided_mode', UInt8, queue_size=1)
 
         self.CurrentMode = Enum('CurrentMode', 'idle lane_following traffic_light')
     
@@ -118,27 +119,6 @@ class DetectTrafficLight():
             loop_rate.sleep()
 
     def cbGetDetectTrafficLightParam(self, config, level):
-        config.hue_red_l = self.hue_red_l
-        config.hue_red_h = self.hue_red_h
-        config.saturation_red_l = self.saturation_red_l
-        config.saturation_red_h = self.saturation_red_h
-        config.lightness_red_l = self.lightness_red_l
-        config.lightness_red_h = self.lightness_red_h
-
-        config.hue_yellow_l = self.hue_yellow_l
-        config.hue_yellow_h = self.hue_yellow_h
-        config.saturation_yellow_l = self.saturation_yellow_l
-        config.saturation_yellow_h = self.saturation_yellow_h
-        config.lightness_yellow_l = self.lightness_yellow_l
-        config.lightness_yellow_h = self.lightness_yellow_h
-
-        config.hue_green_l = self.hue_green_l
-        config.hue_green_h = self.hue_green_h
-        config.saturation_green_l = self.saturation_green_l
-        config.saturation_green_h = self.saturation_green_h
-        config.lightness_green_l =  self.lightness_green_l
-        config.lightness_green_h = self.lightness_green_h
-
         rospy.loginfo("[Detect Traffic Light] Detect Traffic Light Calibration Parameter reconfigured to")
         rospy.loginfo("hue_red_l : %d", config.hue_red_l)
         rospy.loginfo("hue_red_h : %d", config.hue_red_h)
@@ -160,6 +140,27 @@ class DetectTrafficLight():
         rospy.loginfo("saturation_green_h : %d", config.saturation_green_h)
         rospy.loginfo("lightness_green_l : %d", config.lightness_green_l)
         rospy.loginfo("lightness_green_h : %d", config.lightness_green_h)
+
+        self.hue_red_l = config.hue_red_l
+        self.hue_red_h = config.hue_red_h
+        self.saturation_red_l = config.saturation_red_l
+        self.saturation_red_h = config.saturation_red_h
+        self.lightness_red_l = config.lightness_red_l
+        self.lightness_red_h = config.lightness_red_h
+
+        self.hue_yellow_l = config.hue_yellow_l
+        self.hue_yellow_h = config.hue_yellow_h
+        self.saturation_yellow_l = config.saturation_yellow_l
+        self.saturation_yellow_h = config.saturation_yellow_h
+        self.lightness_yellow_l = config.lightness_yellow_l
+        self.lightness_yellow_h = config.lightness_yellow_h
+
+        self.hue_green_l = config.hue_green_l
+        self.hue_green_h = config.hue_green_h
+        self.saturation_green_l = config.saturation_green_l
+        self.saturation_green_h = config.saturation_green_h
+        self.lightness_green_l =  config.lightness_green_l
+        self.lightness_green_h = config.lightness_green_h
 
         return config
 
@@ -223,7 +224,10 @@ class DetectTrafficLight():
             msg_sign.data = self.CurrentMode.lane_following.value
 
             self.pub_traffic_light.publish(msg_sign)
+            self.pub_decide_mode.publish(msg_sign)
             self.is_traffic_light_finished = True
+
+            rospy.loginfo("Traffic Light Finished, publish lnae_following")
             
 
         if self.yellow_count >= 3:
