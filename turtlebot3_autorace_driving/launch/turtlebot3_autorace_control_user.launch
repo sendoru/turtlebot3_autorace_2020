@@ -1,0 +1,4 @@
+<launch>
+    <!-- user control -->
+    <node pkg="turtlebot3_autorace_driving" type="control_user" name="control_user" output="screen"></node>
+</launch>
