@@ -40,7 +40,7 @@ class CoreNodeController():
         self.pub_timer_start = rospy.Publisher('/detect/timer/start', Float64, queue_size= 1)
 
         self.CurrentMode = Enum('CurrentMode', 'idle lane_following traffic_light')
-        self.current_mode = self.CurrentMode.idle.value
+        self.current_mode = self.CurrentMode.traffic_light.value
 
         self.StepOfTrafficLight = Enum('StepOfTrafficLight', 'searching_traffic_light in_traffic_light')    
         self.current_step_traffic_light = self.StepOfTrafficLight.searching_traffic_light.value
@@ -53,7 +53,7 @@ class CoreNodeController():
         self.launch_detect_traffic_light_launched = False
         self.launch_driving_lane_launched = False
 
-        self.is_triggered = False
+        self.is_triggered = True
 
         loop_rate = rospy.Rate(10) # 10hz
         while not rospy.is_shutdown():
