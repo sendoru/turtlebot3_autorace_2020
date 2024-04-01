@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="turtlebot3_autorace_core" type="master_core_node_controller" name="master_core_node_controller" output="screen"/>
+</launch>

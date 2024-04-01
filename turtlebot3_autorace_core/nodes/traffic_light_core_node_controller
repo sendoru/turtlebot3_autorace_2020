@@ -71,6 +71,7 @@ class CoreNodeController():
   
     def fnControlNode(self): 
         # lane_following
+        # run intersection things and release the control to other nodes
         if self.current_mode == self.CurrentMode.lane_following.value:
             rospy.loginfo("New trigger for lane_following")
 
@@ -80,6 +81,7 @@ class CoreNodeController():
             self.fnLaunch(self.Launcher.launch_detect_traffic_light.value, False)
 
             self.fnLaunch(self.Launcher.launch_driving_lane.value, True)
+
 
         # traffic_light
         elif self.current_mode == self.CurrentMode.traffic_light.value:
@@ -109,7 +111,6 @@ class CoreNodeController():
             rospy.sleep(2)
 
             self.pub_traffic_light_order.publish(msg_pub_traffic_light_order)
-
    
     def fnLaunch(self, launch_num, is_start):
         if launch_num == self.Launcher.launch_camera_ex_calib.value:
