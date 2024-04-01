@@ -223,7 +223,7 @@ class DetectTrafficLight():
             cv2.putText(self.cv_image,"GREEN", (self.point_col, self.point_low), cv2.FONT_HERSHEY_DUPLEX, 0.5, (80, 255, 0))
             msg_sign = UInt8()
             msg_sign.data = self.CurrentMode.lane_following.value
-            # self.pub_decide_mode.publish(msg_sign)
+            self.pub_decide_mode.publish(msg_sign)
 
             msg_sign.data = self.TrafficLight.green.value
             self.pub_traffic_light.publish(msg_sign)
