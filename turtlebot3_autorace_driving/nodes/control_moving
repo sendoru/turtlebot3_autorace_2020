@@ -64,6 +64,8 @@ class ControlMoving():
         self.current_theta = 0.0
         self.last_current_theta = 0.0
         self.lastError = 0.0
+        self.cumul_error = 0
+        self.cumul_sqaure_error = 0
 
         self.test = math.radians(90)
      
@@ -152,6 +154,8 @@ class ControlMoving():
         rospy.loginfo("turn_left function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
+            self.cumul_error = 0.0
+            self.cumul_sqaure_error = 0.0
             self.desired_theta = self.current_theta + math.radians(msg.moving_value_angular)
             self.is_step_start = True
         
@@ -165,6 +169,8 @@ class ControlMoving():
         rospy.loginfo("turn_right function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
+            self.cumul_error = 0.0
+            self.cumul_sqaure_error = 0.0
             self.desired_theta = self.current_theta - math.radians(msg.moving_value_angular)
             self.is_step_start = True
 
@@ -179,6 +185,8 @@ class ControlMoving():
         rospy.loginfo("go_forawrd function is called")
         if self.is_step_start == False:
             self.lastErorr = 0.0
+            self.cumul_error = 0.0
+            self.cumul_sqaure_error = 0.0
             self.start_pos_x = self.current_pos_x
             self.start_pos_y = self.current_pos_y
             self.is_step_start = True
@@ -194,6 +202,8 @@ class ControlMoving():
         rospy.loginfo("go_backward function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
+            self.cumul_error = 0.0
+            self.cumul_sqaure_error = 0.0
             self.start_pos_x = self.current_pos_x
             self.start_pos_y = self.current_pos_y
             self.is_step_start = True
@@ -209,11 +219,14 @@ class ControlMoving():
         err_theta = self.current_theta - self.desired_theta
         
         # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)
-        Kp = 0.45
-        Kd = 0.03
+        Kp = 0.4
+        Kd = 0.025
+        Ki = 0.01
 
-        angular_z = Kp * err_theta + Kd * (err_theta - self.lastError)
+        angular_z = Kp * err_theta + Kd * (err_theta - self.lastError) + Ki * self.cumul_error
         self.lastError = err_theta
+        self.cumul_error += err_theta
+        self.cumul_sqaure_error += err_theta ** 2
 
         twist = Twist()
         twist.linear.x = 0 #0
@@ -235,9 +248,12 @@ class ControlMoving():
         # rospy.loginfo("error_pos2 = %f", err_pos)
         Kp = 0.04
         Kd = 0.05
+        Ki = 0.01
 
-        angular_z = Kp * err_pos + Kd * (err_pos - self.lastError)
+        angular_z = Kp * err_pos + Kd * (err_pos - self.lastError) + Ki * self.cumul_error
         self.lastError = err_pos
+        self.cumul_error += err_pos
+        self.cumul_sqaure_error += err_pos ** 2
 
         twist = Twist()
 
@@ -263,9 +279,12 @@ class ControlMoving():
         # rospy.loginfo("error_pos = %f", err_pos)
         Kp = 0.04
         Kd = 0.05
+        Ki = 0.01
 
-        angular_z = Kp * err_pos + Kd * (err_pos - self.lastError)
+        angular_z = Kp * err_pos + Kd * (err_pos - self.lastError) + Ki * self.cumul_error
         self.lastError = err_pos
+        self.cumul_error += err_pos
+        self.cumul_sqaure_error += err_pos ** 2
 
         twist = Twist()
       
