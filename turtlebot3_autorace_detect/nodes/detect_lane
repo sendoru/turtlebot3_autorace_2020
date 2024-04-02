@@ -58,6 +58,8 @@ class DetectLane():
             # subscribes raw image
             self.sub_image_original = rospy.Subscriber('/detect/image_input', Image, self.cbFindLane, queue_size = 1)
 
+        self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', UInt8, self.cbIsReverse, queue_size = 1)
+
         if self.pub_image_type == "compressed":
             # publishes lane image in compressed type 
             self.pub_image_lane = rospy.Publisher('/detect/image_output/compressed', CompressedImage, queue_size = 1)
@@ -92,6 +94,8 @@ class DetectLane():
 
         self.reliability_white_line = 100
         self.reliability_yellow_line = 100
+
+        self.is_reverse = False
 
     def cbGetDetectLaneParam(self, config, level):
         rospy.loginfo("[Detect Lane] Detect Lane Calibration Parameter reconfigured to")
@@ -445,13 +449,19 @@ class DetectLane():
                 cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
 
         elif self.reliability_white_line <= 50 and self.reliability_yellow_line > 50:
-            centerx = np.add(self.left_fitx, 320)
+            if self.is_reverse:
+                centerx = np.subtract(self.right_fitx, 320)
+            else:
+                centerx = np.add(self.left_fitx, 320)
             pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
             cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
 
         elif self.reliability_white_line > 50 and self.reliability_yellow_line <= 50:
-            centerx = np.subtract(self.right_fitx, 320)
+            if self.is_reverse:
+                centerx = np.add(self.left_fitx, 320)
+            else:
+                centerx = np.subtract(self.right_fitx, 320)
             pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
             cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
@@ -481,6 +491,12 @@ class DetectLane():
                 self.pub_lane.publish(msg_desired_center)
 
             self.pub_image_lane.publish(self.cvBridge.cv2_to_imgmsg(final, "bgr8"))
+
+    def cbIsReverse(self, msg):
+        if msg.data == True:
+            self.is_reverse = True
+        else:
+            self.is_reverse = False
 
     def main(self):
         rospy.spin()

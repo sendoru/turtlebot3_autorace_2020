@@ -20,11 +20,14 @@
 # Author: Leon Jung, Gilbert, Ashe Kim
  
 import rospy
+import tf
 import numpy as np
 from std_msgs.msg import Float64, Bool
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 import time
+import math
 
 class ControlLane():
     def __init__(self):
@@ -33,6 +36,8 @@ class ControlLane():
         self.sub_max_vel = rospy.Subscriber('/control/max_vel', Bool, self.cbGetMaxVel, queue_size = 1)
         self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', Bool, self.cbIsReverse, queue_size = 1)
         self.sub_is_stop = rospy.Subscriber('/control/is_stop', Bool, self.cbIsStop, queue_size = 1)
+        self.sub_rotate_180 = rospy.Subscriber('/control/rotate_180', Bool, self.cbRotate180, queue_size = 1)
+        self.sub_odom = rospy.Subscriber('/odom', Odometry, self.cbOdom, queue_size = 1)
 
         self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
         self.pub_error = rospy.Publisher('/control/error', Float64, queue_size = 1)
@@ -48,9 +53,14 @@ class ControlLane():
         self.is_reverse = False
         self.is_reverse_switched = False
         self.is_stop = False
-        self.reverse_degree_sum = 0
+        self.rotate_180 = False
         self.time = 0
 
+        #moving internal valiables
+        self.theta = 0.0
+        self.current_theta = 0.0
+        self.last_current_theta = 0.0
+        self.lastError = 0.0
 
         rospy.on_shutdown(self.fnShutDown)
 
@@ -62,34 +72,67 @@ class ControlLane():
             self.is_reverse_switched = True
             # self.reverse_degree_sum += 180
         self.is_reverse = is_reverse_msg.data
-
-
     
     def cbIsStop(self, is_stop_msg):
         self.is_stop = is_stop_msg.data
 
+    def cbRotate180(self, msg):
+        if not self.rotate_180 and msg.data == True:
+            self.rotate_180 = msg.data
+            self.desired_theta = self.current_theta + np.pi
+            self.lastError = 0
+
+    def turn_180(self):
+        error = self.fnTurn()
+        rospy.loginfo("error : %f (%f deg)", error, error * 180 / np.pi)
+
+        if abs(error) < 0.1:
+            self.rotate_180 = False
+            twist = Twist()
+            twist.linear.x = 0 #0
+            twist.linear.y = 0
+            twist.linear.z = 0
+            twist.angular.x = 0
+            twist.angular.y = 0
+            twist.angular.z = 0
+            self.pub_cmd_vel.publish(twist)
+            self.lastError = 0
+
+    def fnTurn(self):
+        err_theta = self.current_theta - self.desired_theta
+        
+        # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)
+        Kp = 0.45
+        Kd = 0.03
+
+        angular_z = Kp * err_theta + Kd * (err_theta - self.lastError)
+        self.lastError = err_theta
+
+        twist = Twist()
+        twist.linear.x = 0 #0
+        twist.linear.y = 0
+        twist.linear.z = 0
+        twist.angular.x = 0
+        twist.angular.y = 0
+        twist.angular.z = -(angular_z * 2)
+        self.pub_cmd_vel.publish(twist)
+
+        # rospy.loginfo("angular_z : %f", angular_z)
+
+        return err_theta
+
+
     def cbFollowLane(self, desired_center):
+        if self.rotate_180:
+            self.turn_180()
+            return
+        
         self.spin_cnt += 1
         center = desired_center.data
 
         error = center - 500
         self.cumul_error += error
         self.cumul_sqaure_error += error ** 2
-
-        # block other manipulations and turn the robot 180 degrees
-        if self.is_reverse_switched:
-            twist = Twist()
-            twist.linear.x = 0
-            twist.linear.y = 0
-            twist.linear.z = 0
-            twist.angular.x = 0
-            twist.angular.y = 0
-            twist.angular.z = 1.0
-            self.pub_cmd_vel.publish(twist)
-            self.pub_error.publish(error)
-            self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
-            self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
-            return
 
         # stop the robot if obstacle is detected
         if self.is_obstacle_detected or self.is_stop:
@@ -146,6 +189,10 @@ class ControlLane():
                 is_obstacle_detected = True
 
         self.is_obstacle_detected = is_obstacle_detected
+        
+    def euler_from_quaternion(self, quaternion):
+        theta = tf.transformations.euler_from_quaternion(quaternion)[2]
+        return theta
 
     def fnShutDown(self):
         rospy.loginfo("Shutting down. cmd_vel will be 0")
@@ -158,6 +205,19 @@ class ControlLane():
         twist.angular.y = 0
         twist.angular.z = 0
         self.pub_cmd_vel.publish(twist) 
+
+    def cbOdom(self, odom_msg):
+        quaternion = (odom_msg.pose.pose.orientation.x, odom_msg.pose.pose.orientation.y, odom_msg.pose.pose.orientation.z, odom_msg.pose.pose.orientation.w)
+        self.current_theta = self.euler_from_quaternion(quaternion)
+
+        if (self.current_theta - self.last_current_theta) < -math.pi:
+            self.current_theta = 2. * math.pi + self.current_theta
+            self.last_current_theta = math.pi
+        elif (self.current_theta - self.last_current_theta) > math.pi:
+            self.current_theta = -2. * math.pi + self.current_theta
+            self.last_current_theta = -math.pi
+        else:
+            self.last_current_theta = self.current_theta
 
     def main(self):
         rospy.spin()

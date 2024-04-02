@@ -19,9 +19,10 @@
 
 # Author: sendoru
  
-import rospy
+import rospy, roslaunch
 import numpy as np
 import sys, select, os
+from enum import Enum
 if os.name == 'nt':
     import msvcrt, time
 else:
@@ -69,9 +70,15 @@ class ControlUser():
     def __init__(self):
         self.pub_is_reverse = rospy.Publisher('/control/is_reverse', Bool, queue_size = 1)
         self.pub_is_stop = rospy.Publisher('/control/is_stop', Bool, queue_size = 1)
+        self.pub_rotate_180 = rospy.Publisher('/control/rotate_180', Bool, queue_size = 1)
 
         self.is_reverse = False
         self.is_stop = False
+        self.toward = 'forward'
+        self.prev_torward = 'forward'
+        self.Mode = Enum('Mode', 'stop forward backward')
+        self.curr_mode = self.Mode.forward.value
+        self.prev_mode = self.Mode.forward.value
     
     def main(self):
         cur_time = time.time()
@@ -83,20 +90,36 @@ class ControlUser():
                 cur_time = time.time()
             key = getKey()
             if key == '0':
+                self.prev_mode = self.curr_mode
                 print('stop')
                 self.is_stop = True
                 self.is_reverse = False
+                self.curr_mode = self.Mode.stop.value
             elif key == '1':
+                self.prev_mode = self.curr_mode
+                self.prev_torward = self.toward
                 print('move forward')
                 self.is_stop = False
                 self.is_reverse = False
+                self.curr_mode = self.Mode.forward.value
+                self.toward = 'forward'
             elif key == '2':
+                self.prev_mode = self.curr_mode
+                self.prev_torward = self.toward
                 print('move backward')
                 self.is_stop = False
                 self.is_reverse = True
+                self.curr_mode = self.Mode.backward.value
+                self.toward = 'backward'
             # ctrl+c
             elif key == '\x03':
                 break
+
+            if self.prev_torward != self.toward:
+                self.pub_rotate_180.publish(True)
+                self.prev_torward = self.toward
+            else:
+                self.pub_rotate_180.publish(False)
 
             is_reverse_msg = Bool()
             is_reverse_msg.data = self.is_reverse
