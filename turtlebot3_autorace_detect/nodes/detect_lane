@@ -23,7 +23,7 @@ import rospy
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
-from std_msgs.msg import UInt8, Float64
+from std_msgs.msg import UInt8, Float64, Bool
 from sensor_msgs.msg import Image, CompressedImage
 from dynamic_reconfigure.server import Server
 from turtlebot3_autorace_detect.cfg import DetectLaneParamsConfig
@@ -58,7 +58,7 @@ class DetectLane():
             # subscribes raw image
             self.sub_image_original = rospy.Subscriber('/detect/image_input', Image, self.cbFindLane, queue_size = 1)
 
-        self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', UInt8, self.cbIsReverse, queue_size = 1)
+        self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', Bool, self.cbIsReverse, queue_size = 1)
 
         if self.pub_image_type == "compressed":
             # publishes lane image in compressed type 
@@ -159,11 +159,11 @@ class DetectLane():
                 self.mov_avg_right = np.append(self.mov_avg_right,np.array([self.right_fit]), axis=0)
         except:
             if yellow_fraction > 3000:
-                self.left_fitx, self.left_fit = self.sliding_windown(cv_yellow_lane, 'left')
+                self.left_fitx, self.left_fit = self.sliding_windown(cv_yellow_lane, 'right' if self.is_reverse else 'left')
                 self.mov_avg_left = np.array([self.left_fit])
 
             if white_fraction > 3000:
-                self.right_fitx, self.right_fit = self.sliding_windown(cv_white_lane, 'right')
+                self.right_fitx, self.right_fit = self.sliding_windown(cv_white_lane, 'left' if self.is_reverse else 'right')
                 self.mov_avg_right = np.array([self.right_fit])
 
         MOV_AVG_LENGTH = 5
@@ -437,13 +437,19 @@ class DetectLane():
                 cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
             if white_fraction > 3000 and yellow_fraction <= 3000:
-                centerx = np.subtract(self.right_fitx, 320)
+                if self.is_reverse:
+                    centerx = np.add(self.right_fitx, 320)
+                else:
+                    centerx = np.subtract(self.right_fitx, 320)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
                 cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
 
             if white_fraction <= 3000 and yellow_fraction > 3000:
-                centerx = np.add(self.left_fitx, 320)
+                if self.is_reverse:
+                    centerx = np.subtract(self.left_fitx, 320)
+                else:
+                    centerx = np.add(self.left_fitx, 320)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
                 cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
@@ -492,10 +498,20 @@ class DetectLane():
 
             self.pub_image_lane.publish(self.cvBridge.cv2_to_imgmsg(final, "bgr8"))
 
+        print(self.is_reverse)
+
     def cbIsReverse(self, msg):
         if msg.data == True:
+            # self.is_reverse is switched
+            if not self.is_reverse:
+                self.mov_avg_right = None
+                self.mov_avg_left = None
             self.is_reverse = True
+
         else:
+            if self.is_reverse:
+                self.mov_avg_right = None
+                self.mov_avg_left = None
             self.is_reverse = False
 
     def main(self):

@@ -121,7 +121,6 @@ class ControlLane():
 
         return err_theta
 
-
     def cbFollowLane(self, desired_center):
         if self.rotate_180:
             self.turn_180()
@@ -130,6 +129,8 @@ class ControlLane():
         self.spin_cnt += 1
         center = desired_center.data
 
+        print(center)
+        
         error = center - 500
         self.cumul_error += error
         self.cumul_sqaure_error += error ** 2

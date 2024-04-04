@@ -93,7 +93,7 @@ class ControlUser():
                 self.prev_mode = self.curr_mode
                 print('stop')
                 self.is_stop = True
-                self.is_reverse = False
+                # self.is_reverse = False
                 self.curr_mode = self.Mode.stop.value
             elif key == '1':
                 self.prev_mode = self.curr_mode
