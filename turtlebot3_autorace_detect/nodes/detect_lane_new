@@ -1,0 +1,309 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+################################################################################
+# Copyright 2018 ROBOTIS CO., LTD.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+# Authors: Leon Jung, Gilbert, Ashe Kim, Special Thanks : Roger Sacchelli
+
+import rospy
+import numpy as np
+import cv2
+from cv_bridge import CvBridge
+from std_msgs.msg import UInt8, Float64, Bool
+from sensor_msgs.msg import Image, CompressedImage
+from dynamic_reconfigure.server import Server
+from turtlebot3_autorace_detect.cfg import DetectLaneParamsConfig
+from typing import Any
+
+class DetectLane():
+    def __init__(self):
+        self.is_calibration_mode = rospy.get_param("~is_detection_calibration_mode", False)
+
+        # TODO make these configurable
+        self.top_x = rospy.get_param("~top_x", 72)
+        self.top_y = rospy.get_param("~top_y", 4)
+        self.bottom_x = rospy.get_param("~bottom_x", 115)
+        self.bottom_y = rospy.get_param("~bottom_y", 120)
+
+        self.sub_image_type = "raw"         # you can choose image type "compressed", "raw"
+        self.pub_image_type = "compressed"  # you can choose image type "compressed", "raw"
+
+        if self.sub_image_type == "compressed":
+            # subscribes compressed image
+            self.sub_image_original = rospy.Subscriber('/detect/image_input/compressed', CompressedImage, self.cbFindLane, queue_size = 1)
+        elif self.sub_image_type == "raw":
+            # subscribes raw image
+            self.sub_image_original = rospy.Subscriber('/detect/image_input', Image, self.cbFindLane, queue_size = 1)
+
+        self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', Bool, self.cbIsReverse, queue_size = 1)
+
+        if self.pub_image_type == "compressed":
+            # publishes lane image in compressed type 
+            self.pub_image_lane = rospy.Publisher('/detect/image_output/compressed', CompressedImage, queue_size = 1)
+        elif self.pub_image_type == "raw":
+            # publishes lane image in raw type
+            self.pub_image_lane = rospy.Publisher('/detect/image_output', Image, queue_size = 1)
+
+        if self.pub_image_type == "compressed":
+            # publishes lane image in compressed type 
+            # self.pub_lane_mask = rospy.Publisher('/detect/image_output_mask', CompressedImage, queue_size = 1)
+            pass
+
+        elif self.pub_image_type == "raw":
+            # publishes lane image in raw type
+            # self.pub_lane_mask = rospy.Publisher('/detect/image_output_mask', Image, queue_size = 1)
+            pass
+
+        self.pub_lane = rospy.Publisher('/detect/lane', Float64, queue_size = 1)
+
+        # subscribes state : yellow line reliability
+        self.pub_yellow_line_reliability = rospy.Publisher('/detect/yellow_line_reliability', UInt8, queue_size=1)
+ 
+        # subscribes state : white line reliability
+        self.pub_white_line_reliability = rospy.Publisher('/detect/white_line_reliability', UInt8, queue_size=1)
+ 
+        self.cvBridge = CvBridge()
+
+        self.counter = 1
+
+        self.window_width = 1000.
+        self.window_height = 600.
+
+        self.reliability_white_line = 100
+        self.reliability_yellow_line = 100
+        
+        self.prev_lane_mask = None
+
+        self.prev_left_fit = None
+        self.prev_left_fitx = None
+        self.prev_right_fit = None
+        self.prev_right_fitx = None
+
+    def cbFindLane(self, image_msg):
+        # Change the frame rate by yourself. Now, it is set to 1/3 (10fps). 
+        # Unappropriate value of frame rate may cause huge delay on entire recognition process.
+        # This is up to your computer's operating power.
+        if self.counter % 3 != 0:
+            self.counter += 1
+            return
+        else:
+            self.counter = 1
+
+        if self.sub_image_type == "compressed":
+            #converting compressed image to opencv image
+            np_arr = np.frombuffer(image_msg.data, np.uint8)
+            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        elif self.sub_image_type == "raw":
+            cv_image = self.cvBridge.imgmsg_to_cv2(image_msg, "bgr8")
+
+        # find edges
+        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+
+        # geometric transformation
+        edges = self.project_image(edges)
+        cv_image_projected = self.project_image(cv_image)
+
+        # mask lines
+        try:
+            lane_mask = self.mask_line(edges)
+            self.prev_lane_mask = lane_mask.copy()
+        except:
+            lane_mask = self.prev_lane_mask.copy()
+
+        # fine fitting parameters
+        if self.prev_left_fit is None :
+            mask_lines_left = np.zeros_like(lane_mask)
+            mask_lines_left[:, :500] = lane_mask[:, :500]
+            left_fitx, left_fit = self.fit_from_lines(mask_lines_left)
+            self.prev_left_fit = left_fit.copy()
+            self.prev_left_fitx = left_fitx.copy()
+        else:
+            mask_lines_left = np.zeros_like(lane_mask)
+            mask_lines_left[:, :500] = lane_mask[:, :500]
+            left_fitx, left_fit = self.fit_from_lines(mask_lines_left)
+            # exponential moving average
+            left_fitx = np.add(np.multiply(left_fitx, 0.5), np.multiply(self.prev_left_fitx, 0.5))
+            self.prev_left_fitx = left_fitx.copy()
+            left_fit = np.add(np.multiply(left_fit, 0.5), np.multiply(self.prev_left_fit, 0.5))
+            self.prev_left_fit = left_fit.copy()
+
+        if self.prev_right_fit is None:
+            mask_lines_right = np.zeros_like(lane_mask)
+            mask_lines_right[:, 500:] = lane_mask[:, 500:]
+            right_fitx, right_fit = self.fit_from_lines(mask_lines_right)
+            self.prev_right_fit = right_fit.copy()
+            self.prev_right_fitx = right_fitx.copy()
+        else:
+            mask_lines_right = np.zeros_like(lane_mask)
+            mask_lines_right[:, 500:] = lane_mask[:, 500:]
+            right_fitx, right_fit = self.fit_from_lines(mask_lines_right)
+            # exponential moving average
+            right_fitx = np.add(np.multiply(right_fitx, 0.5), np.multiply(self.prev_right_fitx, 0.5))
+            self.prev_right_fitx = right_fitx.copy()
+            right_fit = np.add(np.multiply(right_fit, 0.5), np.multiply(self.prev_right_fit, 0.5))
+            self.prev_right_fit = right_fit.copy()
+
+        centerx = np.mean([left_fitx, right_fitx], axis=0)
+
+        # TODO judge relability
+        # self.reliability_white_line = 100
+        # self.reliability_yellow_line = 100
+
+        # TODO publish visualized image
+        color_wrap_lines = np.zeros_like(cv_image_projected)
+        
+        ploty = np.linspace(0, cv_image_projected.shape[0] - 1, cv_image_projected.shape[0])
+        pts_left = np.array([np.flipud(np.transpose(np.vstack([left_fitx, ploty])))])
+        pts_right = np.array([np.transpose(np.vstack([right_fitx, ploty]))])
+        pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
+
+        cv2.polylines(color_wrap_lines, np.int_([pts_left]), isClosed=False, color=(0, 0, 255), thickness=25)
+        cv2.polylines(color_wrap_lines, np.int_([pts_right]), isClosed=False, color=(255, 255, 0), thickness=25)
+        cv2.polylines(color_wrap_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
+
+        final = cv2.addWeighted(cv_image_projected, 1, color_wrap_lines, 1, 0)
+
+
+        rospy.loginfo("centerx: %f", centerx.item(350))
+        rospy.loginfo("right_fit: %s", left_fitx.mean())
+        rospy.loginfo("left_fit: %s", right_fitx.mean())
+
+        # publish center
+        msg_desired_center = Float64()
+        msg_desired_center.data = centerx.item(350)
+        self.pub_lane.publish(msg_desired_center)
+
+        # publish image
+        if self.pub_image_type == "compressed":
+            self.pub_image_lane.publish(self.cvBridge.cv2_to_compressed_imgmsg(final, "jpg"))
+            # self.pub_lane_mask.publish(self.cvBridge.cv2_to_compressed_imgmsg(np.stack([lane_mask, lane_mask, lane_mask], axis=2), "jpg"))
+        elif self.pub_image_type == "raw":
+            self.pub_image_lane.publish(self.cvBridge.cv2_to_imgmsg(final, "bgr8"))
+            # self.pub_lane_mask.publish(self.cvBridge.cv2_to_imgmsg(np.stack([lane_mask, lane_mask, lane_mask], axis=2), "mono8"))
+
+    # fitting from lines using 2nd order polynomial and M-estimator
+    def fit_from_lines(self, mask):
+        y, x = np.nonzero(mask)
+        fit = np.polyfit(y, x, 2)
+
+        ploty = np.linspace(0, mask.shape[0] - 1, mask.shape[0])
+        lane_fitx = fit[0] * ploty ** 2 + fit[1] * ploty + fit[2]
+
+        # M-estimator
+        residuals = x - (fit[0] * y ** 2 + fit[1] * y + fit[2])
+        median = np.median(residuals)
+        deviation = np.abs(residuals - median)
+        mdev = np.median(deviation)
+        s = 1.1 * mdev
+        mask = deviation < 2.0 * s
+
+        y = y[mask]
+        x = x[mask]
+        fit = np.polyfit(y, x, 2)
+        
+        lane_fitx = fit[0] * ploty ** 2 + fit[1] * ploty + fit[2]
+        return lane_fitx, fit
+
+    def project_image(self, img):
+        # setting homography variables
+        top_x = self.top_x
+        top_y = self.top_y
+        bottom_x = self.bottom_x
+        bottom_y = self.bottom_y
+
+        # adding Gaussian blur to the image of original
+        # img = cv2.GaussianBlur(img, (5, 5), 0)
+
+        ## homography transform process
+        # selecting 4 points from the original image
+        pts_src = np.array([[160 - top_x, 180 - top_y], [160 + top_x, 180 - top_y], [160 + bottom_x, 120 + bottom_y], [160 - bottom_x, 120 + bottom_y]])
+
+        # selecting 4 points from image that will be transformed
+        pts_dst = np.array([[200, 0], [800, 0], [800, 600], [200, 600]])
+
+        # finding homography matrix
+        h, status = cv2.findHomography(pts_src, pts_dst)
+
+        # homography process
+        cv_image_homography = cv2.warpPerspective(img, h, (1000, 600))
+
+        # fill the empty space with black triangles on left and right side of bottom
+        triangle1 = np.array([[0, 599], [0, 340], [200, 599]], np.int32)
+        triangle2 = np.array([[999, 599], [999, 340], [799, 599]], np.int32)
+        black = (0, 0, 0)
+        white = (255, 255, 255)
+        cv_image_homography = cv2.fillPoly(cv_image_homography, [triangle1, triangle2], black)
+
+        cv_image_homography = (cv_image_homography >= 127).astype(np.uint8) * 255
+        return cv_image_homography
+    
+    def mask_line(self, edges, thickness=5):
+    # If there are no lines to draw, exit.
+        lines = cv2.HoughLinesP(
+            edges,
+            rho=6,
+            theta=np.pi / 60,
+            threshold=160,
+            lines=np.array([]),
+            minLineLength=40,
+            maxLineGap=25
+        )
+
+        lines_filtered = []
+        for line in lines:
+            for x1, y1, x2, y2 in line:
+                if x1 == x2:
+                    continue
+                slope = (y2 - y1) / (x2 - x1)
+                if abs(slope) < 2.0:
+                    continue
+                lines_filtered.append(line)
+
+        # Make a copy of the original image.
+        line_img = np.zeros_like(edges)
+        # Create a blank image that matches the original in size.
+        # Loop over all lines and draw them on the blank image.
+        for line in lines_filtered:
+            for x1, y1, x2, y2 in line:
+                cv2.line(line_img, (x1, y1), (x2, y2), [255, 255, 255], thickness)
+
+        line_img = (line_img >= 127).astype(np.uint8) * 255
+
+        return line_img
+
+    def cbIsReverse(self, msg):
+        if msg.data == True:
+            # self.is_reverse is switched
+            if not self.is_reverse:
+                self.mov_avg_right = None
+                self.mov_avg_left = None
+            self.is_reverse = True
+
+        else:
+            if self.is_reverse:
+                self.mov_avg_right = None
+                self.mov_avg_left = None
+            self.is_reverse = False
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('detect_lane')
+    node = DetectLane()
+    node.main()
