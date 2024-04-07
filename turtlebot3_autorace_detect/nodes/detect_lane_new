@@ -33,7 +33,7 @@ class DetectLane():
     def __init__(self):
         self.is_calibration_mode = rospy.get_param("~is_detection_calibration_mode", False)
 
-        self.LANE_MASK_PIXELS_THRESHOLD = 5000
+        self.LANE_MASK_PIXELS_THRESHOLD = 2500
 
         # 
         # TODO make these parameters configurable
@@ -147,11 +147,15 @@ class DetectLane():
                 mask_lines_left[:, :500] = lane_mask[:, :500]
                 left_fitx, left_fit = self.fit_from_lines(mask_lines_left)
                 # exponential moving average
-                # EMA decay factor is determined by reliability of line
-                left_fitx = np.add(np.multiply(left_fitx, 0.5), np.multiply(self.prev_left_fitx, 0.5))
-                self.prev_left_fitx = left_fitx.copy()
-                left_fit = np.add(np.multiply(left_fit, 0.5), np.multiply(self.prev_left_fit, 0.5))
-                self.prev_left_fit = left_fit.copy()
+                # TODO EMA decay factor is determined by reliability of line
+                if self.reliability_left_line != 0:
+                    left_fitx = np.add(np.multiply(left_fitx, 0.5), np.multiply(self.prev_left_fitx, 0.5))
+                    self.prev_left_fitx = left_fitx.copy()
+                    left_fit = np.add(np.multiply(left_fit, 0.5), np.multiply(self.prev_left_fit, 0.5))
+                    self.prev_left_fit = left_fit.copy()
+                else:
+                    self.prev_left_fitx = left_fitx.copy()
+                    self.prev_left_fit = left_fit.copy()
                 if np.count_nonzero(mask_lines_left) >= self.LANE_MASK_PIXELS_THRESHOLD:
                     self.reliability_left_line = min(100., self.reliability_left_line + 5)
                 else:
@@ -170,25 +174,29 @@ class DetectLane():
             if np.count_nonzero(mask_lines_right) >= self.LANE_MASK_PIXELS_THRESHOLD:
                 self.reliability_right_line = min(100., self.reliability_right_line + 2)
             else:
-                self.reliability_right_line = max(0., self.reliability_right_line - 5)
+                self.reliability_right_line = max(0., self.reliability_right_line - 20)
         else:
             try:
                 mask_lines_right = np.zeros_like(lane_mask)
                 mask_lines_right[:, 500:] = lane_mask[:, 500:]
                 right_fitx, right_fit = self.fit_from_lines(mask_lines_right)
                 # exponential moving average
-                right_fitx = np.add(np.multiply(right_fitx, 0.5), np.multiply(self.prev_right_fitx, 0.5))
-                self.prev_right_fitx = right_fitx.copy()
-                right_fit = np.add(np.multiply(right_fit, 0.5), np.multiply(self.prev_right_fit, 0.5))
-                self.prev_right_fit = right_fit.copy()
+                if self.reliability_right_line != 0:
+                    right_fitx = np.add(np.multiply(right_fitx, 0.5), np.multiply(self.prev_right_fitx, 0.5))
+                    self.prev_right_fitx = right_fitx.copy()
+                    right_fit = np.add(np.multiply(right_fit, 0.5), np.multiply(self.prev_right_fit, 0.5))
+                    self.prev_right_fit = right_fit.copy()
+                else:
+                    self.prev_right_fitx = right_fitx.copy()
+                    self.prev_right_fit = right_fit.copy()
                 if np.count_nonzero(mask_lines_right) >= self.LANE_MASK_PIXELS_THRESHOLD:
                     self.reliability_right_line = min(100., self.reliability_right_line + 2)
                 else:
-                    self.reliability_right_line = max(0., self.reliability_right_line - 5)
+                    self.reliability_right_line = max(0., self.reliability_right_line - 20)
             except:
                 right_fitx = self.prev_right_fitx.copy()
                 right_fit = self.prev_right_fit.copy()
-                self.reliability_right_line = max(0., self.reliability_right_line - 10)
+                self.reliability_right_line = max(0., self.reliability_right_line - 50)
 
         rospy.loginfo("reliability_left_line: %f", self.reliability_left_line)
         rospy.loginfo("reliability_right_line: %f", self.reliability_right_line)
@@ -200,7 +208,10 @@ class DetectLane():
         elif self.reliability_right_line >= 50.:
             centerx = right_fitx - 350
         else:
-            centerx = 500 * np.ones_like(left_fitx)
+            if self.reliability_left_line >= self.reliability_right_line:
+                centerx = left_fitx + 350
+            else:
+                centerx = right_fitx - 350
 
         # TODO publish visualized image
         color_wrap_lines = np.zeros_like(cv_image_projected)
