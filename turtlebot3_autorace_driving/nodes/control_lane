@@ -129,7 +129,7 @@ class ControlLane():
         self.spin_cnt += 1
         center = desired_center.data
 
-        print(center)
+        # print(center)
         
         error = center - 500
         self.cumul_error += error
