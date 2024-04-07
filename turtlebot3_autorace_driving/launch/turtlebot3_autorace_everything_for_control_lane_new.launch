@@ -1,0 +1,81 @@
+<launch>
+  <!-- intrinsic camera calib -->
+  <group>
+    <!-- image transport from compressed to raw -->
+    <node pkg="image_transport" type="republish" name="republish" args="compressed">
+      <remap from="in"  to="camera/rgb/image_raw" />
+      <remap from="out"   to="camera/image"/>
+    </node>
+    <node pkg="topic_tools" type="relay" name="relay_camera_info" args="/camera/rgb/camera_info /camera/camera_info"/>
+  </group>
+
+  <!-- image rectification -->
+  <node ns="camera" pkg="image_proc" type="image_proc" name="image_proc" args="_approximate_sync:=true" output="screen">
+    <remap from="image_raw" to="image" />
+    <param name="queue_size" value="20" />
+  </node>
+
+  <!-- extrinsic camera calib -->
+  <!-- launch turtlebot3_autorace_camera_calibration.launch in the raspberry pi before launch this file -->
+  <arg name="mode" default="action" doc="mode type [calibration, action]"/>
+
+  <group ns="camera">
+    <!-- image brightness & contrast compensation of ground-projected image -->
+    <node pkg="turtlebot3_autorace_camera" type="image_compensation" name="image_compensation" output="screen">
+      <rosparam command="load" file="$(find turtlebot3_autorace_camera)/calibration/extrinsic_calibration/compensation.yaml" />
+      <param if="$(eval mode == 'calibration')" name="/is_extrinsic_camera_calibration_mode" value="True"/>
+      <param if="$(eval mode == 'action')" name="/is_extrinsic_camera_calibration_mode" value="False"/>
+      <remap from="/camera/image_input" to="/camera/image_rect_color" />
+      <remap from="/camera/image_input/compressed" to="/camera/image_rect_color/compressed" />
+      <remap from="/camera/image_output" to="/camera/image_compensated" />
+      <remap from="/camera/image_output/compressed" to="/camera/image_compensated/compressed" />
+    </node>
+
+    <!-- image ground projection
+    <node pkg="turtlebot3_autorace_camera" type="image_projection" name="image_projection" output="screen">
+      <rosparam command="load" file="$(find turtlebot3_autorace_camera)/calibration/extrinsic_calibration/projection.yaml" />
+      <param if="$(eval mode == 'calibration')" name="/is_extrinsic_camera_calibration_mode" value="True"/>
+      <param if="$(eval mode == 'action')" name="/is_extrinsic_camera_calibration_mode" value="False"/>    
+      <remap from="/camera/image_input" to="/camera/image_rect_color" />
+      <remap from="/camera/image_input/compressed" to="/camera/image_rect_color/compressed" />
+      <remap from="/camera/image_output" to="/camera/image_projected" />
+      <remap from="/camera/image_output/compressed" to="/camera/image_projected/compressed" />
+      <remap from="/camera/image_calib" to="/camera/image_extrinsic_calib" />
+      <remap from="/camera/image_calib/compressed" to="/camera/image_extrinsic_calib/compressed" />
+    </node> -->
+
+    <!-- image brightness & contrast compensation of ground-projected image -->
+    <node pkg="turtlebot3_autorace_camera" type="image_compensation" name="image_compensation_projection" output="screen">
+      <rosparam command="load" file="$(find turtlebot3_autorace_camera)/calibration/extrinsic_calibration/compensation.yaml" />
+      <param if="$(eval mode == 'calibration')" name="/is_extrinsic_camera_calibration_mode" value="True"/>
+      <param if="$(eval mode == 'action')" name="/is_extrinsic_camera_calibration_mode" value="False"/>    
+      <remap from="/camera/image_input" to="/camera/image_projected" />
+      <remap from="/camera/image_input/compressed" to="/camera/image_projected/compressed" />
+      <remap from="/camera/image_output" to="/camera/image_projected_compensated" />
+      <remap from="/camera/image_output/compressed" to="/camera/image_projected_compensated/compressed" />
+    </node>
+  </group>
+
+  <!-- lane detection -->
+  <node pkg="turtlebot3_autorace_detect" type="detect_lane_new" name="detect_lane" output="screen">
+    <rosparam command="load" file="$(find turtlebot3_autorace_detect)/param/lane/lane.yaml" />
+    <param if="$(eval mode == 'calibration')" name="/is_detection_calibration_mode" value="True"/>
+    <param if="$(eval mode == 'action')" name="/is_detection_calibration_mode" value="False"/>    
+    <remap from="/detect/image_input" to="/camera/image" />
+    <remap from="/detect/image_input/compressed" to="/camera/image/compressed" />
+    <remap from="/detect/image_output" to="/detect/image_lane" />
+    <remap from="/detect/image_output/compressed" to="/detect/image_lane/compressed" />
+    <remap from="/detect/image_output_sub1" to="/detect/image_white_lane_marker" />
+    <remap from="/detect/image_output_sub1/compressed" to="/detect/image_white_lane_marker/compressed" />
+    <remap from="/detect/image_output_sub2" to="/detect/image_yellow_lane_marker" />
+    <remap from="/detect/image_output_sub2/compressed" to="/detect/image_yellow_lane_marker/compressed" />
+    <remap from="/detect/image_lane_mask" to="/detect/image_output_mask" />
+  </node>
+
+  <!-- lane control -->
+  <node pkg="turtlebot3_autorace_driving" type="control_lane" name="control_lane" output="screen">
+    <remap from="/control/lane" to="/detect/lane" />
+    <remap from="/control/cmd_vel" to="/cmd_vel" />
+  </node>
+
+</launch>
