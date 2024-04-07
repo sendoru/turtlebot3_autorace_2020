@@ -498,7 +498,7 @@ class DetectLane():
 
             self.pub_image_lane.publish(self.cvBridge.cv2_to_imgmsg(final, "bgr8"))
 
-        print(self.is_reverse)
+        # print(self.is_reverse)
 
     def cbIsReverse(self, msg):
         if msg.data == True:
