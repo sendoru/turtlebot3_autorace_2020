@@ -27,7 +27,7 @@ from std_msgs.msg import UInt8, Float64, Bool
 from sensor_msgs.msg import Image, CompressedImage
 from dynamic_reconfigure.server import Server
 from turtlebot3_autorace_detect.cfg import DetectLaneParamsConfig
-from typing import Any
+# from typing import Any
 
 class DetectLane():
     def __init__(self):
