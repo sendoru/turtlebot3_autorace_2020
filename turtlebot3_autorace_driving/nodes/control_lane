@@ -153,7 +153,7 @@ class ControlLane():
         # Original Kp : 0.0025
         Kp = 0.007
         # Original Kd : 0.007
-        Kd = 0.007
+        Kd = 0.01
         # Ki was added later
         # TODO : set proper Ki with tuning
         Ki = 0.0015

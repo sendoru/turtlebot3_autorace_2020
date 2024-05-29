@@ -33,7 +33,7 @@ class DetectLane():
     def __init__(self):
         self.is_calibration_mode = rospy.get_param("~is_detection_calibration_mode", False)
 
-        self.LANE_MASK_PIXELS_THRESHOLD = 2500
+        self.LANE_MASK_PIXELS_THRESHOLD = 1500
 
         # 
         # TODO make these parameters configurable
@@ -163,7 +163,7 @@ class DetectLane():
             except:
                 left_fitx = self.prev_left_fitx.copy()
                 left_fit = self.prev_left_fit.copy()
-                self.reliability_left_line = max(0., self.reliability_left_line - 10)
+                self.reliability_left_line = max(0., self.reliability_left_line - 8)
 
         if self.prev_right_fit is None:
             mask_lines_right = np.zeros_like(lane_mask)
@@ -174,7 +174,7 @@ class DetectLane():
             if np.count_nonzero(mask_lines_right) >= self.LANE_MASK_PIXELS_THRESHOLD:
                 self.reliability_right_line = min(100., self.reliability_right_line + 2)
             else:
-                self.reliability_right_line = max(0., self.reliability_right_line - 20)
+                self.reliability_right_line = max(0., self.reliability_right_line - 8)
         else:
             try:
                 mask_lines_right = np.zeros_like(lane_mask)
@@ -208,10 +208,15 @@ class DetectLane():
         elif self.reliability_right_line >= 50.:
             centerx = right_fitx - 350
         else:
-            if self.reliability_left_line >= self.reliability_right_line:
-                centerx = left_fitx + 350
-            else:
-                centerx = right_fitx - 350
+            centerx = 400
+            # if self.reliability_left_line >= self.reliability_right_line and self.reliability_left_line >= 30:
+            #     centerx = left_fitx + 350
+            # elif self.reliability_left_line < self.reliability_right_line and self.reliability_right_line >= 30:
+            #     centerx = right_fitx - 350
+            # else:
+            #     centerx = self.prev_centerx
+
+        self.prev_centerx = centerx
 
         # TODO publish visualized image
         color_wrap_lines = np.zeros_like(cv_image_projected)
