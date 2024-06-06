@@ -45,10 +45,14 @@ class ControlLane():
         self.pub_mse_error = rospy.Publisher('/control/mse_error', Float64, queue_size = 1)
 
         self.MAX_VEL = 0.18
-        self.OBSTACLE_DISTANCE_THRESHOLD = 0.4
-        self.OBSTACLE_AVOID_DISTANCE = 0.25 * (2**0.5)
+        self.OBSTACLE_DISTANCE_THRESHOLD = 0.35
+        self.OBSTACLE_AVOID_DISTANCE = 0.27 * (2**0.5)
         # in radian
-        self.OBSTACLE_AVOID_ANGLE = np.pi / 4
+        self.OBSTACLE_AVOID_ROTATE_ANGLE = np.pi / 4
+        # zero degree +- OBSTACLE_AVOID_SCAN_RANCE
+        self.OBSTACLE_AVOID_SCAN_RANCE = 15
+        # 연속으로 n프레임 이상 장애물 감지 시 회피 로직 시갖
+        self.OBSTACLE_DETECTED_FRAME_THRESHOLD = 10
 
         self.cumul_error = 0
         self.cumul_sqaure_error = 0
@@ -61,8 +65,12 @@ class ControlLane():
         self.is_reverse = False
         self.is_reverse_switched = False
         self.is_stop = False
-        self.rotating = False
+        self.is_rotating = False
+        self.is_straight_moving = False
+        self.desired_dist = -1
         self.time = 0
+        self.obstacle_detected_frame = 0\
+        
 
         #moving internal valiables
         self.theta = 0.0
@@ -85,13 +93,13 @@ class ControlLane():
         self.is_stop = is_stop_msg.data
 
     def cbRotate180(self, msg):
-        if not self.rotating and msg.data == True:
-            self.rotating = msg.data
+        if not self.is_rotating and msg.data == True:
+            self.is_rotating = msg.data
             self.desired_theta = self.current_theta + np.pi
             self.lastError = 0
 
     def start_rotate(self, theta):
-        self.rotating = True
+        self.is_rotating = True
         self.desired_theta = self.current_theta + theta
         self.lastError = 0
 
@@ -99,8 +107,8 @@ class ControlLane():
         error = self.rotate_control()
         rospy.loginfo("error : %f (%f deg)", error, error * 180 / np.pi)
 
-        if abs(error) < 0.01:
-            self.rotating = False
+        if abs(error) < 0.02:
+            self.is_rotating = False
             twist = Twist()
             twist.linear.x = 0 #0
             twist.linear.y = 0
@@ -115,8 +123,8 @@ class ControlLane():
         err_theta = self.current_theta - self.desired_theta
         
         # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)
-        Kp = 0.45
-        Kd = 0.03
+        Kp = 0.64
+        Kd = 0.04
 
         angular_z = Kp * err_theta + Kd * (err_theta - self.lastError)
         self.lastError = err_theta
@@ -133,32 +141,73 @@ class ControlLane():
         # rospy.loginfo("angular_z : %f", angular_z)
 
         return err_theta
+
+    def start_straight(self, dist):
+        self.is_straight_moving = True
+        self.pose_start = self.pose
+        self.desired_dist = dist
+        self.lastError = 0
+    
+    def straight(self):
+        error = self.straight_control()
+        rospy.loginfo("error : %f", error)
+
+        if abs(error) < 0.02:
+            self.is_straight_moving = False
+            twist = Twist()
+            twist.linear.x = 0 #0
+            twist.linear.y = 0
+            twist.linear.z = 0
+            twist.angular.x = 0
+            twist.angular.y = 0
+            twist.angular.z = 0
+            self.pub_cmd_vel.publish(twist)
+            self.lastError = 0
+
+    def straight_control(self):
+        dist = math.sqrt((self.pose.position.x - self.pose_start.position.x)**2 + (self.pose.position.y - self.pose_start.position.y)**2)
+        err_dist = self.desired_dist - dist
+        # TODO : set proper Kp and Kd with tuning
+        Kp = 0.64
+        Kd = 0.04
+
+        angular_z = Kp * err_dist + Kd * (err_dist - self.lastError)
+        self.lastError = err_dist
+
+        twist = Twist()
+        twist.linear.x = min(self.MAX_VEL, err_dist)
+        twist.linear.y = 0
+        twist.linear.z = 0
+        twist.angular.x = 0
+        twist.angular.y = 0
+        twist.angular.z = 0
+        self.pub_cmd_vel.publish(twist)
+
+        return err_dist
     
     def avoid_obstacle(self):
         if self.avoid_step == 0:
-            if self.rotating:
+            if self.is_rotating:
                 self.rotate()
             else:
                 rospy.loginfo("Move to Step 1")
                 self.avoid_step = 1
-                self.pose_start = self.pose
+                self.start_straight(self.OBSTACLE_AVOID_DISTANCE)
         elif self.avoid_step == 1:
-            self.move_cmd = Twist()
-            self.move_cmd.linear.x = self.MAX_VEL
-            self.pub_cmd_vel.publish(self.move_cmd)
-            self.delta_distance = math.sqrt((self.pose.position.x - self.pose_start.position.x)**2 + (self.pose.position.y - self.pose_start.position.y)**2)
-            if self.delta_distance > 0.5:
+            if self.is_straight_moving:
+                self.straight()
+            else:
+                rospy.loginfo("Move to Step 2")
                 self.avoid_step = 2
-                self.start_rotate(-self.OBSTACLE_AVOID_ANGLE)
-                self.rotatine = True
+                self.start_rotate(-self.OBSTACLE_AVOID_ROTATE_ANGLE)
         elif self.avoid_step == 2:
-            if self.rotating:
+            if self.is_rotating:
                 self.rotate()
             else:
                 self.avoid_step = -1
                 self.avoiding_obstacle = False
                 self.cumul_error = 0
-                self.OBSTACLE_AVOID_ANGLE *= -1
+                self.OBSTACLE_AVOID_ROTATE_ANGLE *= -1
 
 
     def cbFollowLane(self, desired_center):
@@ -191,7 +240,7 @@ class ControlLane():
         #     return
 
         # Original Kp : 0.0025
-        Kp = 0.007
+        Kp = 0.0055
         # Original Kd : 0.007
         Kd = 0.01
         # Ki was added later
@@ -219,22 +268,25 @@ class ControlLane():
         self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
 
     def cbScanObstacle(self, scan):
-        angle_scan = 25
-        scan_start = 0 - angle_scan
-        scan_end = 0 + angle_scan
+        scan_start = 0 - self.OBSTACLE_AVOID_SCAN_RANCE
+        scan_end = 0 + self.OBSTACLE_AVOID_SCAN_RANCE
         is_obstacle_detected = False
         min_distance = 1000.
 
-        for i in range(scan_start, scan_end):
+        for i in range(scan_start, scan_end + 1):
             min_distance = min(min_distance, scan.ranges[i])
         rospy.loginfo("min_distance : %f", min_distance)
 
         if min_distance < self.OBSTACLE_DISTANCE_THRESHOLD and not self.avoiding_obstacle:
+            self.obstacle_detected_frame += 1
+        else :
+            self.obstacle_detected_frame = 0
+        if self.obstacle_detected_frame > self.OBSTACLE_DETECTED_FRAME_THRESHOLD:
             rospy.loginfo("Obstacle detected")
             is_obstacle_detected = True
             self.avoiding_obstacle = True
             self.avoid_step = 0
-            self.start_rotate(self.OBSTACLE_AVOID_ANGLE)
+            self.start_rotate(self.OBSTACLE_AVOID_ROTATE_ANGLE)
             self.is_obstacle_detected = is_obstacle_detected
             return
 
