@@ -46,9 +46,9 @@ class ControlLane():
 
         self.MAX_VEL = 0.18
         self.OBSTACLE_DISTANCE_THRESHOLD = 0.35
-        self.OBSTACLE_AVOID_DISTANCE = 0.27 * (2**0.5)
+        self.OBSTACLE_AVOID_DISTANCE = 0.27 * (2**0.4)
         # in radian
-        self.OBSTACLE_AVOID_ROTATE_ANGLE = np.pi / 4
+        self.OBSTACLE_AVOID_ROTATE_ANGLE = np.pi / 3.5
         # zero degree +- OBSTACLE_AVOID_SCAN_RANCE
         self.OBSTACLE_AVOID_SCAN_RANCE = 15
         # 연속으로 n프레임 이상 장애물 감지 시 회피 로직 시갖
