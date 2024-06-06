@@ -326,6 +326,9 @@ class DetectLane():
                 slope = (y2 - y1) / (x2 - x1)
                 if abs(slope) < 2.0:
                     continue
+                length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                if length < 100:
+                    continue
                 lines_filtered.append(line)
 
         # Make a copy of the original image.
