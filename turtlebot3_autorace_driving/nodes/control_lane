@@ -31,7 +31,7 @@ import math
 
 class ControlLane():
     def __init__(self):
-        self.sub_scan_obstacle = rospy.Subscriber('/detect/scan', LaserScan, self.cbScanObstacle, queue_size=1)
+        self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.cbScanObstacle, queue_size=1)
         self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
         self.sub_max_vel = rospy.Subscriber('/control/max_vel', Bool, self.cbGetMaxVel, queue_size = 1)
         self.sub_is_reverse = rospy.Subscriber('/control/is_reverse', Bool, self.cbIsReverse, queue_size = 1)
@@ -44,16 +44,24 @@ class ControlLane():
         self.pub_cumul_square_error = rospy.Publisher('/control/cumul_square_error', Float64, queue_size = 1)
         self.pub_mse_error = rospy.Publisher('/control/mse_error', Float64, queue_size = 1)
 
+        self.MAX_VEL = 0.18
+        self.OBSTACLE_DISTANCE_THRESHOLD = 0.4
+        self.OBSTACLE_AVOID_DISTANCE = 0.25 * (2**0.5)
+        # in radian
+        self.OBSTACLE_AVOID_ANGLE = np.pi / 4
+
         self.cumul_error = 0
         self.cumul_sqaure_error = 0
         self.spin_cnt = 0
         self.lastError = 0
-        self.MAX_VEL = 0.18
+
         self.is_obstacle_detected = False
+        self.avoiding_obstacle = False
+        self.avoid_step = -1
         self.is_reverse = False
         self.is_reverse_switched = False
         self.is_stop = False
-        self.rotate_180 = False
+        self.rotating = False
         self.time = 0
 
         #moving internal valiables
@@ -77,17 +85,22 @@ class ControlLane():
         self.is_stop = is_stop_msg.data
 
     def cbRotate180(self, msg):
-        if not self.rotate_180 and msg.data == True:
-            self.rotate_180 = msg.data
+        if not self.rotating and msg.data == True:
+            self.rotating = msg.data
             self.desired_theta = self.current_theta + np.pi
             self.lastError = 0
 
-    def turn_180(self):
-        error = self.fnTurn()
+    def start_rotate(self, theta):
+        self.rotating = True
+        self.desired_theta = self.current_theta + theta
+        self.lastError = 0
+
+    def rotate(self):
+        error = self.rotate_control()
         rospy.loginfo("error : %f (%f deg)", error, error * 180 / np.pi)
 
-        if abs(error) < 0.1:
-            self.rotate_180 = False
+        if abs(error) < 0.01:
+            self.rotating = False
             twist = Twist()
             twist.linear.x = 0 #0
             twist.linear.y = 0
@@ -98,7 +111,7 @@ class ControlLane():
             self.pub_cmd_vel.publish(twist)
             self.lastError = 0
 
-    def fnTurn(self):
+    def rotate_control(self):
         err_theta = self.current_theta - self.desired_theta
         
         # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)
@@ -120,10 +133,37 @@ class ControlLane():
         # rospy.loginfo("angular_z : %f", angular_z)
 
         return err_theta
+    
+    def avoid_obstacle(self):
+        if self.avoid_step == 0:
+            if self.rotating:
+                self.rotate()
+            else:
+                rospy.loginfo("Move to Step 1")
+                self.avoid_step = 1
+                self.pose_start = self.pose
+        elif self.avoid_step == 1:
+            self.move_cmd = Twist()
+            self.move_cmd.linear.x = self.MAX_VEL
+            self.pub_cmd_vel.publish(self.move_cmd)
+            self.delta_distance = math.sqrt((self.pose.position.x - self.pose_start.position.x)**2 + (self.pose.position.y - self.pose_start.position.y)**2)
+            if self.delta_distance > 0.5:
+                self.avoid_step = 2
+                self.start_rotate(-self.OBSTACLE_AVOID_ANGLE)
+                self.rotatine = True
+        elif self.avoid_step == 2:
+            if self.rotating:
+                self.rotate()
+            else:
+                self.avoid_step = -1
+                self.avoiding_obstacle = False
+                self.cumul_error = 0
+                self.OBSTACLE_AVOID_ANGLE *= -1
+
 
     def cbFollowLane(self, desired_center):
-        if self.rotate_180:
-            self.turn_180()
+        if self.avoiding_obstacle:
+            self.avoid_obstacle()
             return
         
         self.spin_cnt += 1
@@ -136,19 +176,19 @@ class ControlLane():
         self.cumul_sqaure_error += error ** 2
 
         # stop the robot if obstacle is detected
-        if self.is_obstacle_detected or self.is_stop:
-            twist = Twist()
-            twist.linear.x = 0
-            twist.linear.y = 0
-            twist.linear.z = 0
-            twist.angular.x = 0
-            twist.angular.y = 0
-            twist.angular.z = 0
-            self.pub_cmd_vel.publish(twist)
-            self.pub_error.publish(error)
-            self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
-            self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
-            return
+        # if self.is_obstacle_detected or self.is_stop:
+        #     twist = Twist()
+        #     twist.linear.x = 0
+        #     twist.linear.y = 0
+        #     twist.linear.z = 0
+        #     twist.angular.x = 0
+        #     twist.angular.y = 0
+        #     twist.angular.z = 0
+        #     self.pub_cmd_vel.publish(twist)
+        #     self.pub_error.publish(error)
+        #     self.pub_cumul_square_error.publish(self.cumul_sqaure_error)
+        #     self.pub_mse_error.publish(np.sqrt(self.cumul_sqaure_error / self.spin_cnt))
+        #     return
 
         # Original Kp : 0.0025
         Kp = 0.007
@@ -182,12 +222,21 @@ class ControlLane():
         angle_scan = 25
         scan_start = 0 - angle_scan
         scan_end = 0 + angle_scan
-        threshold_distance = 0.2
         is_obstacle_detected = False
+        min_distance = 1000.
 
         for i in range(scan_start, scan_end):
-            if scan.ranges[i] < threshold_distance and scan.ranges[i] > 0.01:
-                is_obstacle_detected = True
+            min_distance = min(min_distance, scan.ranges[i])
+        rospy.loginfo("min_distance : %f", min_distance)
+
+        if min_distance < self.OBSTACLE_DISTANCE_THRESHOLD and not self.avoiding_obstacle:
+            rospy.loginfo("Obstacle detected")
+            is_obstacle_detected = True
+            self.avoiding_obstacle = True
+            self.avoid_step = 0
+            self.start_rotate(self.OBSTACLE_AVOID_ANGLE)
+            self.is_obstacle_detected = is_obstacle_detected
+            return
 
         self.is_obstacle_detected = is_obstacle_detected
         
@@ -208,6 +257,7 @@ class ControlLane():
         self.pub_cmd_vel.publish(twist) 
 
     def cbOdom(self, odom_msg):
+        self.pose = odom_msg.pose.pose
         quaternion = (odom_msg.pose.pose.orientation.x, odom_msg.pose.pose.orientation.y, odom_msg.pose.pose.orientation.z, odom_msg.pose.pose.orientation.w)
         self.current_theta = self.euler_from_quaternion(quaternion)
 
